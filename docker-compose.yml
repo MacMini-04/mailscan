@@ -1,0 +1,57 @@
+version: "3.9"
+
+services:
+  # ---------- OCR service (Flask + Tesseract + ImageMagick) ----------
+  ocr:
+    build: ./ocr
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/ocr"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------- PostgreSQL ----------
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mailscan
+      POSTGRES_PASSWORD: mailscan
+      POSTGRES_DB: mailscan
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mailscan"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---------- MailScan (FastAPI) ----------
+  mailscan:
+    build: ./mailscan
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      ocr:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      IMAP_HOST: "${IMAP_HOST:-imap.mail.me.com}"
+      IMAP_PORT: "${IMAP_PORT:-993}"
+      IMAP_USER: "${IMAP_USER}"
+      IMAP_PASS: "${IMAP_PASS}"
+      IMAP_FOLDER: "${IMAP_FOLDER:-INBOX}"
+      POLL_INTERVAL: "${POLL_INTERVAL:-30}"
+      OCR_URL: "http://ocr:5001/ocr"
+      OLLAMA_URL: "http://host.docker.internal:11434"
+      OLLAMA_MODEL: "llama3.2:3b"
+      DATABASE_URL: "postgresql://mailscan:mailscan@db:5432/mailscan"
+
+volumes:
+  pgdata:
